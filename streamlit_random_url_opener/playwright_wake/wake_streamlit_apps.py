@@ -15,6 +15,7 @@ from typing import Any
 
 
 SLEEP_TEXT = "This app has gone to sleep due to inactivity"
+WAKE_PROGRESS_TEXT = "Your app is waking up"
 WAKE_BUTTON_RE = re.compile(r"Yes,\s*get this app back up!?", re.IGNORECASE)
 DEFAULT_URLS_FILE = Path(__file__).with_name("urls.json")
 
@@ -51,6 +52,18 @@ def parse_args() -> argparse.Namespace:
         help="Sleep 0..N seconds before each URL to avoid opening everything at once.",
     )
     parser.add_argument("--navigation-timeout-ms", type=int, default=90_000)
+    parser.add_argument(
+        "--sleep-detection-timeout-ms",
+        type=int,
+        default=8_000,
+        help="Wait this long after navigation for Streamlit's sleep screen to render.",
+    )
+    parser.add_argument(
+        "--post-click-wait-ms",
+        type=int,
+        default=15_000,
+        help="Keep the browser open this long after clicking the wake button.",
+    )
     parser.add_argument("--wake-timeout-ms", type=int, default=180_000)
     return parser.parse_args()
 
@@ -177,23 +190,56 @@ def wake_app(context: Any, app: AppUrl, args: argparse.Namespace, timeout_error:
         )
         status_code = response.status if response else "no-response"
 
-        if not page_contains_sleep_message(page):
+        if not wait_for_sleep_screen(page, args.sleep_detection_timeout_ms, timeout_error):
             wait_for_streamlit_page(page, timeout_error)
+            if wait_for_sleep_screen(page, 1_000, timeout_error):
+                return click_wake_button(page, app, status_code, args, timeout_error)
             return WakeResult(app.name, app.url, "awake", f"HTTP {status_code}")
 
-        button = page.get_by_role("button", name=WAKE_BUTTON_RE).first
-        try:
-            button.click(timeout=10_000)
-        except timeout_error:
-            fallback = page.get_by_text(WAKE_BUTTON_RE).first
-            fallback.click(timeout=10_000)
-
-        wait_until_awake(page, args.wake_timeout_ms, timeout_error)
-        return WakeResult(app.name, app.url, "woke", f"clicked wake button after HTTP {status_code}")
+        return click_wake_button(page, app, status_code, args, timeout_error)
     except timeout_error as exc:
         return WakeResult(app.name, app.url, "timeout", trim(str(exc)))
     finally:
         page.close()
+
+
+def click_wake_button(
+    page: Any,
+    app: AppUrl,
+    status_code: int | str,
+    args: argparse.Namespace,
+    timeout_error: type[Exception],
+) -> WakeResult:
+    button = page.get_by_role("button", name=WAKE_BUTTON_RE).first
+    try:
+        button.click(timeout=10_000)
+    except timeout_error:
+        fallback = page.get_by_text(WAKE_BUTTON_RE).first
+        fallback.click(timeout=10_000)
+
+    wait_for_wake_request(page, args.wake_timeout_ms, timeout_error)
+    if args.post_click_wait_ms:
+        page.wait_for_timeout(args.post_click_wait_ms)
+    return WakeResult(app.name, app.url, "woke", f"clicked wake button after HTTP {status_code}")
+
+
+def wait_for_sleep_screen(page: Any, timeout_ms: int, timeout_error: type[Exception]) -> bool:
+    try:
+        page.wait_for_function(
+            f"""
+            () => {{
+              const text = document.body ? document.body.innerText : "";
+              const hasSleepText = text.includes({json.dumps(SLEEP_TEXT)});
+              const buttons = Array.from(document.querySelectorAll("button"));
+              const hasWakeButton = buttons.some((button) => /Yes,\\s*get this app back up!?/i.test(button.innerText));
+              return hasSleepText || hasWakeButton;
+            }}
+            """,
+            timeout=timeout_ms,
+        )
+    except timeout_error:
+        return False
+    return True
 
 
 def page_contains_sleep_message(page: Any) -> bool:
@@ -204,7 +250,7 @@ def page_contains_sleep_message(page: Any) -> bool:
     return SLEEP_TEXT in body_text
 
 
-def wait_until_awake(page: Any, timeout_ms: int, timeout_error: type[Exception]) -> None:
+def wait_for_wake_request(page: Any, timeout_ms: int, timeout_error: type[Exception]) -> None:
     try:
         page.wait_for_load_state("networkidle", timeout=timeout_ms)
     except timeout_error:
@@ -212,7 +258,13 @@ def wait_until_awake(page: Any, timeout_ms: int, timeout_error: type[Exception])
 
     try:
         page.wait_for_function(
-            f"!document.body || !document.body.innerText.includes({json.dumps(SLEEP_TEXT)})",
+            f"""
+            () => {{
+              const text = document.body ? document.body.innerText : "";
+              return !text.includes({json.dumps(SLEEP_TEXT)})
+                || text.includes({json.dumps(WAKE_PROGRESS_TEXT)});
+            }}
+            """,
             timeout=timeout_ms,
         )
     except timeout_error:

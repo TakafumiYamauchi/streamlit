@@ -30,6 +30,8 @@ jobs:
         run: python -m playwright install --with-deps chromium
 
       - name: Open apps and click wake button when needed
+        env:
+          PYTHONUNBUFFERED: "1"
         run: >
           python streamlit_random_url_opener/playwright_wake/wake_streamlit_apps.py
           --randomize-order

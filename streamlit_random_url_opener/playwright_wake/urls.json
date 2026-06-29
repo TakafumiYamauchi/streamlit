@@ -163,15 +163,15 @@
   {
     "name": "paroligu / app.py",
     "url": "https://paroligu.streamlit.app/" 
-  }  
+  } ,
   {
     "name": "esperanto-radiko-cjk-annotator / main.py",
     "url": "https://esperanto-radiko-cjk-annotator.streamlit.app/" 
-  }  
+  } , 
   {
     "name": "esperanto-radiko-cjk-annotator-zh / main.py",
     "url": "https://esperanto-radiko-cjk-annotator-zh.streamlit.app/" 
-  }  
+  } ,
   {
     "name": "esperanto-radiko-cjk-annotator-ko / main.py",
     "url": "https://esperanto-radiko-cjk-annotator-ko.streamlit.app/" 

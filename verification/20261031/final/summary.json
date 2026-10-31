@@ -1,0 +1,11 @@
+{
+  "tested_commit": "2b3312b533713941e29e64ddb2c0b55c0dd5282b",
+  "run_url": "https://github.com/TakafumiYamauchi/streamlit/actions/runs/41211932843",
+  "conclusion": "success",
+  "unit_tests_passed": 17,
+  "browser_dom_tests_passed": 15,
+  "active_urls": 39,
+  "commented_urls": 11,
+  "new_apps_rendered": 5,
+  "scope": "Five new revision apps after custom-component error/readiness support. Other existing apps not claimed validated by this run."
+}

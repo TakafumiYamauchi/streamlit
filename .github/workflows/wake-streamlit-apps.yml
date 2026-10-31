@@ -2,8 +2,18 @@ name: Wake Streamlit apps
 
 on:
   workflow_dispatch:
+    inputs:
+      limit:
+        description: "0: all active apps; 5: only the five revision apps"
+        type: choice
+        options: ["0", "5"]
+        default: "0"
   schedule:
+    # Two repositories run every four hours, offset by two hours (UTC).
     - cron: "17 */4 * * *"
+
+permissions:
+  contents: read
 
 concurrency:
   group: wake-streamlit-apps
@@ -15,8 +25,8 @@ env:
 jobs:
   wake:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-
+    # 180 seconds per app bounds even outage checks; setup time is also bounded.
+    timeout-minutes: 150
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -26,16 +36,40 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Check configuration and readiness logic
+        run: |
+          python -m unittest discover -s tests -v
+          python streamlit_random_url_opener/playwright_wake/wake_streamlit_apps.py --dry-run
+
       - name: Install Python dependencies
+        timeout-minutes: 10
         run: python -m pip install -r streamlit_random_url_opener/playwright_wake/requirements.txt
 
       - name: Install Chromium
+        timeout-minutes: 15
         run: python -m playwright install --with-deps chromium
 
-      - name: Open apps and click wake button when needed
+      - name: Verify browser readiness detection on local fixtures
+        env:
+          RUN_BROWSER_FIXTURES: "1"
+        run: python -m unittest discover -s tests -p test_page_state_dom.py -v
+
+      - name: Verify apps and wake only when needed
         env:
           PYTHONUNBUFFERED: "1"
+          WAKE_LIMIT: ${{ inputs.limit || '0' }}
         run: >
           python streamlit_random_url_opener/playwright_wake/wake_streamlit_apps.py
-          --randomize-order
-          --max-delay-seconds 20
+          --limit "$WAKE_LIMIT"
+          --max-delay-seconds 5
+          --wake-timeout-ms 180000
+          --report-file wake-results.json
+
+      - name: Save per-app results even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wake-results
+          path: wake-results.json
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,37 +1,67 @@
-# Playwright Wake Button Mode
+# Streamlitの表示確認と休止からの復帰
 
-Google Apps Script版は軽くて安定していますが、ブラウザではないため、Streamlit Cloudの sleep 画面に出る `Yes, get this app back up!` ボタンはクリックできません。
+## 対象の変更
 
-このフォルダは、GitHub Actions上でChromiumを起動し、各URLを開いて、sleep画面だった場合だけwakeボタンをクリックする強化版です。
+`urls.jsonc` を編集します。通常のJSON配列に加え、行頭の空白に続く `//` から始まるコメント行に対応します。
+行末コメント、ブロックコメント、末尾カンマは使用できません。URL内の `https://` はそのまま保持します。
+独自の厳密JSONも `--urls-file path/to/urls.json` で指定できます。
 
-## 動き
+2026-10-31の更新で追加した5件：
 
-- Chromiumで各URLを開きます。
-- ページ本文に `This app has gone to sleep due to inactivity` があるか確認します。
-- sleep画面なら `Yes, get this app back up!` をクリックします。
-- sleep画面でなければ、そのまま「起きている」と判定します。
+- [日本語・修正版変換](https://esperanto-cjk-revision-ja-20261017.streamlit.app/)
+- [中国語・修正版変換](https://esperanto-cjk-revision-zh-20261017.streamlit.app/)
+- [韓国語・修正版変換](https://esperanto-cjk-revision-ko-20261017.streamlit.app/)
+- [日本語・修正版逆変換](https://esperanto-reverter-revision-ja-20261018.streamlit.app/)
+- [中国語・修正版逆変換](https://esperanto-reverter-revision-zh-20261018.streamlit.app/)
 
-## GitHub Actionsで使う
+日本語・中国語・韓国語・英語・エスペラント語の既存URLは維持しました。
+アラビア語・フランス語・ドイツ語・ヒンディー語・インドネシア語・イタリア語・ポーランド語・ロシア語（通常／beta）・スペイン語・ベトナム語の11件はコメントアウトしています。
 
-このディレクトリ全体をGitHubリポジトリに置き、`.github/workflows/wake-streamlit-apps.yml` もリポジトリ直下に置くと、4時間ごとに自動実行されます。
+## 動作
 
-手動実行したい場合は、GitHubのリポジトリ画面で:
+1. 1アプリずつ通常URLを開きます。
+2. 休止画面がある場合だけ、公式の復帰ボタンを押します。
+3. 外枠だけでなく、メイン画面または埋め込まれたアプリ内のStreamlit表示を確認します。
+4. 通常URLの外枠が進まない場合は、同じCloudアプリの本体URL `/~/+/` を1回だけ試します。
+5. HTTPエラー、読み込み中、復帰処理中だけの画面は成功扱いにしません。
+6. 接続を閉じ、失敗したアプリがあっても後続へ進みます。個別結果は毎回保存します。
 
-1. `Actions` を開く
-2. `Wake Streamlit apps` を選ぶ
-3. `Run workflow` を押す
+アプリごとの待機は、画面移動・復帰ボタン・再試行も合わせて180秒までです。
+通常URLの確認に最大60秒、その後は残り時間を使います。別アプリを同時に大量起動しません。
+復帰ボタン以外の操作、本文変換、版切替、キャッシュ削除、アプリの管理設定変更は行いません。
 
-## ローカルで試す
+## 定期実行と手動確認
+
+このリポジトリのUTCスケジュールは `17 */4 * * *` です。
+TakafumiYamauchi側は0・4・8・12・16・20時17分、montainternoadorihistorion側は2・6・10・14・18・22時17分。
+各リポジトリ4時間間隔を維持し、開始を2時間ずらします。時刻はGitHubの混雑で遅れることがあります。
+
+[Actions](https://github.com/TakafumiYamauchi/streamlit/actions/workflows/wake-streamlit-apps.yml) から `Run workflow` を押すと手動実行できます。
+`wake-results` の成果物に成功・失敗と未処理対象が残ります。失敗があれば実行全体も失敗となるので、その対象を調べてください。
+
+リポジトリ直下からのローカル確認：
 
 ```bash
-python -m pip install -r playwright_wake/requirements.txt
+python -m unittest discover -s tests -v
+python streamlit_random_url_opener/playwright_wake/wake_streamlit_apps.py --dry-run
+python -m pip install -r streamlit_random_url_opener/playwright_wake/requirements.txt
 python -m playwright install chromium
-python playwright_wake/wake_streamlit_apps.py --dry-run
-python playwright_wake/wake_streamlit_apps.py --randomize-order --max-delay-seconds 20
+python streamlit_random_url_opener/playwright_wake/wake_streamlit_apps.py --report-file wake-results.json
 ```
 
-## 注意
+登録済み1アプリだけ確認する場合は `--only-url https://example.streamlit.app/` を指定します。
+複数ならこの引数を繰り返します。既存の `--randomize-order` と `--limit` も利用できますが、定期実行は追加した修正版5件を最初に確認します。
 
-- GitHub Actionsのスケジュール実行は、指定時刻ぴったりではなく数分遅れることがあります。
-- Chromiumを起動するため、Apps Script版より重いです。基本はApps Script版を常用し、このPlaywright版はsleep救援用に使うのが現実的です。
-- URLを変更した場合は、`urls.json` も更新してください。
+## 保証できないこと
+
+Streamlit Community Cloudは無アクセス12時間で休止します。定期訪問で休止を減らし、休止していた場合に復帰を試みます。
+単純なHTTP GETだけが活動として数えられるという保証には依存しません。
+資源不足・アプリ内の例外・Cloudの障害による停止は、この巡回だけでは修復できません。
+[Streamlit公式の管理・休止・資源制限の説明](https://docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app)
+
+GitHub Actionsの定期実行は既定ブランチの内容で動作し、混雑時には遅延・取りこぼしがあり得ます。
+公開リポジトリは60日間活動がないと定期実行が自動停止するため、Actionsの状態も確認してください。
+無意味な空コミットで常時更新する仕組みは追加していません。
+[GitHub公式のschedule仕様](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
+
+手動実行の limit は 0（全件）または 5（先頭の修正版5件）を選べます。定期実行は常に全件です。

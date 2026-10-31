@@ -75,6 +75,19 @@ class DOMTests(unittest.TestCase):
             with self.subTest(markup=markup):
                 self.assertEqual(self.state(MAIN + markup)["state"], "error")
 
+    def test_component_loading_failure_is_error_not_rendered_markdown(self):
+        warning = '<div data-testid="stMarkdownContainer">Your app is having trouble loading the <code>mobile_streamlit_bridge.esperanto_mobile_pwa</code> component.</div>'
+        for markup in (MAIN + warning,
+                       '<div data-testid="stMainBlockContainer"><div data-testid="stElementContainer">' + warning + '</div></div>'):
+            with self.subTest(markup=markup):
+                state = self.state(markup)
+                self.assertEqual(state["state"], "error")
+                self.assertIn("mobile_streamlit_bridge.esperanto_mobile_pwa", state["detail"])
+
+    def test_hidden_component_warning_does_not_block_a_ready_app(self):
+        warning = '<div data-testid="stAlert" style="display:none">Your app is having trouble loading the example component.</div>'
+        self.assertEqual(self.state(MAIN + warning)["state"], "ready")
+
     def test_sleep_and_waking_screens_are_not_success(self):
         sleeping = self.state('<p>This app has gone to sleep due to inactivity</p><button>Yes, get this app back up!</button>')
         self.assertEqual(sleeping["state"], "sleep")
@@ -85,6 +98,42 @@ class DOMTests(unittest.TestCase):
         self.page.set_content('<p>Cloud shell</p><iframe style="width:900px;height:600px" srcdoc="' + html.escape(MAIN, quote=True) + '"></iframe>')
         self.page.frame_locator('iframe').locator('textarea').wait_for()
         self.assertEqual(wake.inspect_page(self.page)[0]["state"], "ready")
+
+    def component_fixture(self, contents, *, testid="stCustomComponentV1", in_main=True):
+        origin = "https://fixture.streamlit.app"
+        component_path = "/~/+/component/example.quiz/index.html"
+        frame = '<iframe style="width:900px;height:600px" data-testid="' + testid + '" src="' + component_path + '"></iframe>'
+        markup = '<div data-testid="stMainBlockContainer">' + frame + '</div>' if in_main else frame
+        self.context.route(origin + "/", lambda route: route.fulfill(status=200, content_type="text/html", body=markup))
+        self.context.route(origin + component_path, lambda route: route.fulfill(status=200, content_type="text/html", body=contents))
+        self.page.goto(origin + "/")
+
+    def test_custom_component_with_real_controls_is_ready(self):
+        self.component_fixture('<h1>Quiz</h1><button>Start quiz</button>')
+        self.page.frame_locator('iframe').get_by_role('button').wait_for()
+        state = wake.inspect_page(self.page)[0]
+        self.assertEqual(state["state"], "ready")
+        self.assertIn("custom component", state["detail"])
+
+    def test_blank_custom_component_is_not_ready(self):
+        self.component_fixture('')
+        self.assertEqual(wake.inspect_page(self.page)[0]["state"], "loading")
+        self.page.set_content('<div data-testid="stMainBlockContainer"><iframe data-testid="stCustomComponentV1" src="about:blank"></iframe></div>')
+        self.assertEqual(wake.inspect_page(self.page)[0]["state"], "loading")
+
+    def test_unrelated_or_outside_main_iframe_does_not_qualify(self):
+        for options in ({"testid": "not-a-streamlit-component"}, {"in_main": False}):
+            with self.subTest(options=options):
+                self.component_fixture('<button>Unrelated button</button>', **options)
+                self.assertEqual(wake.inspect_page(self.page)[0]["state"], "loading")
+
+    def test_custom_component_error_or_loading_does_not_count_as_ready(self):
+        for status, markup in (("error", '<div role="alert">Failed to load quiz</div><button>Retry</button>'),
+                               ("loading", '<div role="status">Loading...</div><button>Quiz</button>'),
+                               ("loading", '<div>Service status: OK</div>')):
+            with self.subTest(status=status, markup=markup):
+                self.component_fixture(markup)
+                self.assertEqual(wake.inspect_page(self.page)[0]["state"], status)
 
 
 if __name__ == "__main__":

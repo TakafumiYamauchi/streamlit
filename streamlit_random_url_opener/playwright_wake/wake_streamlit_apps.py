@@ -36,6 +36,11 @@ PAGE_STATE_JS = r"""() => {
     + '[data-testid="stStatusWidget"], .stStatusWidget'
   )].filter(e => visible(e) && /Connection error|Connection lost|Unable to (?:re)?connect|Could not connect|Disconnected/i.test(e.innerText));
   errors.push(...disconnected);
+  const componentErrors = [...document.querySelectorAll(
+    '[data-testid="stAlert"], [data-testid="stNotification"], [role="alert"], '
+    + '[data-testid="stMarkdownContainer"], [data-testid="stElementContainer"], .element-container'
+  )].filter(e => visible(e) && /Your app is having trouble loading the .+? component\./i.test(e.innerText.replace(/\s+/g, ' ')));
+  errors.push(...componentErrors);
   if (errors.length) return {state:'error', detail:errors.map(e => e.innerText).join(' ').slice(0,400)};
   if (wake || sleep) return {state:'sleep', wake, detail:'Cloud inactivity screen'};
   if (text.includes('Your app is waking up')) return {state:'loading', detail:'Cloud is waking the app'};
@@ -54,6 +59,37 @@ PAGE_STATE_JS = r"""() => {
     || e.querySelector('input, textarea, select, canvas, img'))));
   return {state:rendered ? 'ready' : 'loading',
     detail:rendered ? 'Visible Streamlit app content' : 'No rendered Streamlit app content'};
+}"""
+
+# A custom component is eligible only when its actual iframe is visible inside
+# the real Streamlit main area and uses Streamlit's same-origin component route.
+COMPONENT_HOST_JS = r"""e => {
+  const visible = n => {
+    const s = getComputedStyle(n), r = n.getBoundingClientRect();
+    return s.display !== 'none' && s.visibility !== 'hidden' && r.width > 0 && r.height > 0;
+  };
+  const root = e.closest('[data-testid="stMainBlockContainer"], [data-testid="stAppViewBlockContainer"], '
+    + '.main .block-container, .stMain .block-container, .stMainBlockContainer');
+  const src = new URL(e.getAttribute('src') || 'about:blank', document.baseURI);
+  return e.matches('iframe[data-testid="stCustomComponentV1"]') && root && visible(root) && visible(e)
+    && src.origin === location.origin && /^\/(?:~\/\+\/)?component\//.test(src.pathname);
+}"""
+
+COMPONENT_STATE_JS = r"""() => {
+  const visible = e => {
+    const s = getComputedStyle(e), r = e.getBoundingClientRect();
+    return s.display !== 'none' && s.visibility !== 'hidden' && r.width > 0 && r.height > 0;
+  };
+  const alerts = [...document.querySelectorAll('[role="alert"]')].filter(e => visible(e)
+    && /\b(?:error|failed|unable|timed out|timeout)\b/i.test(e.innerText));
+  if (alerts.length) return {state:'error', detail:alerts.map(e => e.innerText).join(' ').slice(0,400)};
+  const busy = [...document.querySelectorAll('[aria-busy="true"], [role="progressbar"], [role="status"]')]
+    .some(e => visible(e) && (e.matches('[aria-busy="true"], [role="progressbar"]')
+      || /loading|connecting|please wait/i.test(e.innerText)));
+  const usable = [...document.querySelectorAll('button, input:not([type="hidden"]), select, textarea')]
+    .some(e => visible(e) && !e.disabled && (e.tagName !== 'BUTTON' || e.innerText.trim()));
+  return {state:!busy && usable ? 'ready' : 'loading',
+    detail:!busy && usable ? 'Visible UI in a Streamlit custom component' : 'Custom component has no ready UI'};
 }"""
 
 
@@ -179,6 +215,14 @@ def inspect_page(page: Any) -> tuple[dict[str, Any], Any]:
     for frame in page.frames:
         try:
             state = frame.evaluate(PAGE_STATE_JS)
+            if (isinstance(state, dict) and state.get("state") == "loading"
+                    and getattr(frame, "parent_frame", None) is not None):
+                # Empty/about:blank placeholders and arbitrary child frames never qualify.
+                parts = urlsplit(frame.url)
+                if (parts.scheme == "https" and (parts.hostname or "").endswith(".streamlit.app")
+                        and re.match(r"^/(?:~/\+/)?component/", parts.path)
+                        and frame.frame_element().evaluate(COMPONENT_HOST_JS)):
+                    state = frame.evaluate(COMPONENT_STATE_JS)
             if isinstance(state, dict):
                 states.append((state, frame))
         except Exception:

@@ -1,4 +1,5 @@
 [
+  // 2026-11-01: 両リポジトリの和集合39件に統一。名称・URL・順序・対象外11件も共通。
   // 2026-10-31: 修正版5アプリを追加。日本語・中国語・韓国語・英語・エスペラント語版を維持。
   {"name":"修正版・日本語漢字変換 / Esperanto-Kanji-Ruby-JA","url":"https://esperanto-cjk-revision-ja-20261017.streamlit.app/"},
   {"name":"修正版・中国語漢字変換 / Esperanto-Kanji-Ruby-ZH","url":"https://esperanto-cjk-revision-zh-20261017.streamlit.app/"},

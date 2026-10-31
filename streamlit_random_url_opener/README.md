@@ -7,6 +7,8 @@ GitHub ActionsのChromiumで、登録したStreamlitアプリを1件ずつ開き
 - 操作方法と制約：[playwright_wake/README.md](playwright_wake/README.md)
 - 実行履歴：[Wake Streamlit apps](https://github.com/TakafumiYamauchi/streamlit/actions/workflows/wake-streamlit-apps.yml)
 
+2026-11-01に、[TakafumiYamauchi側](https://github.com/TakafumiYamauchi/streamlit/blob/main/streamlit_random_url_opener/playwright_wake/urls.jsonc)と[montainternoadorihistorion側](https://github.com/montainternoadorihistorion/streamlit/blob/main/streamlit_random_url_opener/playwright_wake/urls.jsonc)の対象を和集合に統一しました。名称・URL・順序と対象外の11件も同一です。今後、対象を変更する際は両方の一覧を同時に更新してください。
+
 現在は39件を有効にしています。修正版の変換アプリ（日中韓）と逆変換アプリ（日中）を追加しました。
 日本語・中国語・韓国語・英語・エスペラント語以外の11件は、URLを消さず `//` コメントとして残しています。
 コメント行へのアクセスは行いません。Cloud上のアプリ自体を削除する操作でもありません。

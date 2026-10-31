@@ -65,3 +65,16 @@ GitHub Actionsの定期実行は既定ブランチの内容で動作し、混雑
 [GitHub公式のschedule仕様](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
 
 手動実行の limit は 0（全件）または 5（先頭の修正版5件）を選べます。定期実行は常に全件です。
+
+## フォーク側のActionsが止まっている場合
+
+Actions画面に `Workflows on this fork have been disabled` と表示されたら、
+GitHubがフォーク元から継承した実行を停止しています。設定APIで enabled=true、個別workflowで active と返っても、この状態が残ることがあります。
+必要な対象・頻度であることを確認し、画面の `I understand my workflows, go ahead and re-enable them` で再有効化します。
+今回のmontainternoadorihistorion側は2026-10-31にこの画面から再有効化しました。
+
+## 更新後の実確認（2026-10-31）
+
+新しい5アプリをGitHub Actions上のブラウザで確認し、すべて通常URLから表示できました（約5.6～6.4秒）。単体17件・ブラウザ画面判定9件も成功しました。
+[実行結果](https://github.com/TakafumiYamauchi/streamlit/actions/runs/41210707920) / [保存した個別結果](../../verification/20261031/wake-results.json)
+この実行は先頭5件を対象としており、残る34件を実接続済みとする記録ではありません。

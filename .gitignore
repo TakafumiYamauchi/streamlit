@@ -3,4 +3,4 @@ __pycache__/
 .venv/
 venv/
 
-wake-results.json
+/wake-results.json

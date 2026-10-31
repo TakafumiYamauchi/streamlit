@@ -1,0 +1,66 @@
+{
+  "updated_utc": "2026-10-31T14:35:26.630946+00:00",
+  "complete": true,
+  "total": 5,
+  "checked": 5,
+  "successful": 5,
+  "results": [
+    {
+      "name": "修正版・日本語漢字変換 / Esperanto-Kanji-Ruby-JA",
+      "url": "https://esperanto-cjk-revision-ja-20261017.streamlit.app/",
+      "status": "awake",
+      "detail": "Visible Streamlit app content",
+      "attempts": 1,
+      "wake_clicked": false,
+      "elapsed_seconds": 6.36,
+      "checked_url": "https://esperanto-cjk-revision-ja-20261017.streamlit.app/",
+      "ok": true
+    },
+    {
+      "name": "修正版・中国語漢字変換 / Esperanto-Kanji-Ruby-ZH",
+      "url": "https://esperanto-cjk-revision-zh-20261017.streamlit.app/",
+      "status": "awake",
+      "detail": "Visible Streamlit app content",
+      "attempts": 1,
+      "wake_clicked": false,
+      "elapsed_seconds": 5.946,
+      "checked_url": "https://esperanto-cjk-revision-zh-20261017.streamlit.app/",
+      "ok": true
+    },
+    {
+      "name": "修正版・韓国語漢字変換 / Esperanto-Kanji-Ruby-KO",
+      "url": "https://esperanto-cjk-revision-ko-20261017.streamlit.app/",
+      "status": "awake",
+      "detail": "Visible Streamlit app content",
+      "attempts": 1,
+      "wake_clicked": false,
+      "elapsed_seconds": 6.101,
+      "checked_url": "https://esperanto-cjk-revision-ko-20261017.streamlit.app/",
+      "ok": true
+    },
+    {
+      "name": "修正版・日本語逆変換 / Esperanto-Reverter-JA",
+      "url": "https://esperanto-reverter-revision-ja-20261018.streamlit.app/",
+      "status": "awake",
+      "detail": "Visible Streamlit app content",
+      "attempts": 1,
+      "wake_clicked": false,
+      "elapsed_seconds": 5.633,
+      "checked_url": "https://esperanto-reverter-revision-ja-20261018.streamlit.app/",
+      "ok": true
+    },
+    {
+      "name": "修正版・中国語逆変換 / Esperanto-Reverter-ZH",
+      "url": "https://esperanto-reverter-revision-zh-20261018.streamlit.app/",
+      "status": "awake",
+      "detail": "Visible Streamlit app content",
+      "attempts": 1,
+      "wake_clicked": false,
+      "elapsed_seconds": 5.675,
+      "checked_url": "https://esperanto-reverter-revision-zh-20261018.streamlit.app/",
+      "ok": true
+    }
+  ],
+  "unvisited": [],
+  "meaning": "Rendered app content was observed; this is not a guarantee of continuous availability or correct conversion."
+}

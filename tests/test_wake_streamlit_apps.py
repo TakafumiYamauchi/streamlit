@@ -154,10 +154,10 @@ class WakeTests(unittest.TestCase):
         self.assertEqual(len(context.created), 1)
 
     def test_http_200_spinner_is_not_success_and_has_total_budget(self):
-        result, context = self.check([self.page(('loading',)), self.page(('loading',))])
+        result, context = self.check([self.page(('loading',)) for _ in range(3)])
         self.assertFalse(result.ok)
         self.assertEqual(result.status, 'timeout')
-        self.assertEqual(result.attempts, 2)
+        self.assertEqual(result.attempts, 3)
         self.assertLessEqual(self.clock.now, 180.001)
         self.assertEqual(context.created[1].url, 'https://test.streamlit.app/~/+/')
 
@@ -170,14 +170,14 @@ class WakeTests(unittest.TestCase):
 
     def test_app_exception_does_not_get_hidden_by_another_ready_frame(self):
         page = Page(self.clock, [Frame(['ready'], self.clock), Frame(['error'], self.clock)])
-        result, _ = self.check([page, self.page(['error'])])
+        result, _ = self.check([page, self.page(['error']), self.page(['error'])])
         self.assertFalse(result.ok)
         self.assertEqual(result.status, 'error')
 
     def test_click_alone_or_wake_progress_does_not_mean_success(self):
         frame = Frame(['sleep'], self.clock, after_click=['loading'])
         page = Page(self.clock, [frame])
-        result, _ = self.check([page, self.page(['loading'])])
+        result, _ = self.check([page, self.page(['loading']), self.page(['loading'])])
         self.assertEqual(frame.clicks, 1)
         self.assertTrue(result.wake_clicked)
         self.assertFalse(result.ok)
@@ -190,29 +190,64 @@ class WakeTests(unittest.TestCase):
         self.assertGreaterEqual(result.elapsed_seconds, 2)
 
     def test_navigation_timeout_can_recover_on_the_single_fallback(self):
-        result, _ = self.check([self.page(['loading'], navigation_timeout=True), self.page()])
+        result, _ = self.check([self.page(['loading'], navigation_timeout=True), self.page(), self.page()])
         self.assertTrue(result.ok)
-        self.assertEqual(result.attempts, 2)
+        self.assertEqual(result.attempts, 3)
+        self.assertEqual(result.checked_url, self.app.url)
         self.assertLessEqual(result.elapsed_seconds, 180)
 
     def test_two_navigation_timeouts_do_not_double_the_budget(self):
-        result, _ = self.check([self.page(['loading'], navigation_timeout=True), self.page(['loading'], navigation_timeout=True)])
+        result, _ = self.check([self.page(['loading'], navigation_timeout=True) for _ in range(3)])
         self.assertFalse(result.ok)
         self.assertLessEqual(result.elapsed_seconds, 180.001)
 
     def test_slow_navigation_does_not_hide_already_rendered_app(self):
-        result, _ = self.check([self.page(['loading'], navigation_timeout=True), self.page(['ready'], navigation_timeout=True)])
+        result, _ = self.check([self.page(['loading'], navigation_timeout=True),
+                                self.page(['ready'], navigation_timeout=True), self.page()])
         self.assertTrue(result.ok)
-        self.assertEqual(result.attempts, 2)
+        self.assertEqual(result.attempts, 3)
 
     def test_transient_ready_content_must_remain_ready(self):
-        result, _ = self.check([self.page(['ready', 'loading']), self.page(['loading'])])
+        result, _ = self.check([self.page(['ready', 'loading']), self.page(['loading']), self.page(['loading'])])
         self.assertFalse(result.ok)
 
     def test_server_error_retry_does_not_prevent_a_successful_fallback(self):
-        result, _ = self.check([self.page(status=503), self.page()])
+        result, _ = self.check([self.page(status=503), self.page(), self.page()])
         self.assertTrue(result.ok)
-        self.assertEqual(result.attempts, 2)
+        self.assertEqual([r.status for r in result.checks], ['http_error', 'ready', 'ready'])
+        self.assertEqual(result.attempts, 3)
+
+    def test_body_ready_does_not_hide_public_failure(self):
+        result, _ = self.check([self.page(status=502), self.page(), self.page(status=404)])
+        self.assertFalse(result.ok)
+        self.assertEqual(result.status, 'body_only')
+        self.assertEqual([r.url for r in result.checks], [self.app.url, wake.body_url(self.app.url), self.app.url])
+        self.assertEqual([r.detail for r in result.checks], ['HTTP 502', 'observed ready', 'HTTP 404'])
+
+    def test_body_and_shell_failures_are_recorded_separately(self):
+        result, _ = self.check([self.page(['loading']), self.page(status=502), self.page(status=404)])
+        self.assertFalse(result.ok)
+        self.assertEqual([r.status for r in result.checks], ['timeout', 'http_error', 'http_error'])
+        self.assertEqual([r.detail for r in result.checks][1:], ['HTTP 502', 'HTTP 404'])
+
+    def test_public_url_can_recover_even_when_body_is_unavailable(self):
+        for body in (self.page(status=502), self.page(status=404), self.page(['loading'])):
+            with self.subTest(body_status=body.status):
+                result, _ = self.check([self.page(['loading']), body, self.page(['ready'])])
+                self.assertTrue(result.ok)
+                self.assertEqual(result.checked_url, self.app.url)
+                self.assertEqual(result.attempts, 3)
+                self.assertLessEqual(result.elapsed_seconds, 180)
+
+    def test_detached_frame_is_transient_but_inspection_error_is_reported(self):
+        broken = Frame(['loading'], self.clock)
+        page = Page(self.clock, [Frame(['ready'], self.clock), broken])
+        with patch.object(broken, 'evaluate', side_effect=RuntimeError('Frame was detached')):
+            self.assertEqual(wake.inspect_page(page)[0]['state'], 'ready')
+        with patch.object(broken, 'evaluate', side_effect=RuntimeError('unexpected inspection failure')):
+            state, _ = wake.inspect_page(page)
+            self.assertEqual(state['state'], 'error')
+            self.assertIn('unexpected inspection failure', state['detail'])
 
 
 class ReportTests(unittest.TestCase):

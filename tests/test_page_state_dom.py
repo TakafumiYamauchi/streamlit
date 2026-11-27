@@ -5,6 +5,7 @@ import importlib.util
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 
 SOURCE = Path(__file__).resolve().parents[1] / "streamlit_random_url_opener/playwright_wake/wake_streamlit_apps.py"
 spec = importlib.util.spec_from_file_location("wake_dom_under_test", SOURCE)
@@ -43,6 +44,29 @@ class DOMTests(unittest.TestCase):
 
     def test_visible_main_content_is_ready(self):
         self.assertEqual(self.state(MAIN)["state"], "ready")
+
+    def test_body_recovery_requires_a_new_successful_public_visit(self):
+        from playwright.sync_api import TimeoutError as BrowserTimeout
+
+        url = "https://fixture.streamlit.app/"
+        args = SimpleNamespace(wake_timeout_ms=12_000, navigation_timeout_ms=4_000,
+                               sleep_detection_timeout_ms=0, post_click_wait_ms=0)
+        for public_status in (502, 200):
+            with self.subTest(public_status=public_status):
+                public_responses = iter((503, public_status))
+                def serve_public(route):
+                    status = next(public_responses)
+                    route.fulfill(status=status, content_type="text/html", body=MAIN)
+
+                self.context.route(url, serve_public)
+                self.context.route(wake.body_url(url), lambda route: route.fulfill(
+                    status=200, content_type="text/html", body=MAIN))
+                result = wake.wake_app(self.context, wake.AppUrl("fixture", url), args, BrowserTimeout)
+                self.assertEqual([r.url for r in result.checks], [url, wake.body_url(url), url])
+                self.assertEqual(result.ok, public_status == 200)
+                self.assertEqual(result.status, "awake" if public_status == 200 else "body_only")
+                self.context.unroute(url)
+                self.context.unroute(wake.body_url(url))
 
     def test_cloud_header_or_empty_app_container_is_not_ready(self):
         for markup in ('<header><button>Deploy</button></header>',

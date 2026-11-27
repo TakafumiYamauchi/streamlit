@@ -100,6 +100,13 @@ class AppUrl:
 
 
 @dataclass(frozen=True)
+class RouteCheck:
+    url: str
+    status: str
+    detail: str
+
+
+@dataclass(frozen=True)
 class WakeResult:
     name: str
     url: str
@@ -109,6 +116,7 @@ class WakeResult:
     wake_clicked: bool = False
     elapsed_seconds: float = 0
     checked_url: str = ""
+    checks: tuple[RouteCheck, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -131,7 +139,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--post-click-wait-ms", type=int, default=15_000,
                         help="Minimum ready observation after wake click, within the total budget.")
     parser.add_argument("--wake-timeout-ms", type=int, default=180_000,
-                        help="TOTAL per-app budget including navigation, wake and one retry.")
+                        help="Total budget for all navigation, wake and public URL recovery checks.")
     args = parser.parse_args()
     if not 0 <= args.max_delay_seconds <= 300:
         parser.error("--max-delay-seconds must be between 0 and 300")
@@ -225,9 +233,11 @@ def inspect_page(page: Any) -> tuple[dict[str, Any], Any]:
                     state = frame.evaluate(COMPONENT_STATE_JS)
             if isinstance(state, dict):
                 states.append((state, frame))
-        except Exception:
-            # Frames may detach while Cloud replaces its shell with the app.
-            continue
+        except Exception as exc:
+            # The shell can replace a frame between enumeration and evaluation.
+            if re.search(r"frame (?:was |has been )?detached|execution context was destroyed", str(exc), re.I):
+                continue
+            return {"state": "error", "detail": "Frame inspection failed: " + trim(str(exc))}, frame
     for wanted in ("error", "sleep", "ready", "loading"):
         for state, frame in states:
             if state.get("state") == wanted:
@@ -269,17 +279,22 @@ def wake_app(context: Any, app: AppUrl, args: argparse.Namespace, timeout_error:
     final_status = "timeout"
     checked_url = app.url
     attempts = 0
-    for attempt, url in enumerate((app.url, body_url(app.url)), 1):
+    checks: list[RouteCheck] = []
+    for attempt, url in enumerate((app.url, body_url(app.url), app.url), 1):
         if remaining_ms(deadline) <= 0:
             break
         attempts = attempt
         checked_url = url
         phase_deadline = deadline
-        if attempt == 1:
-            phase_seconds = max(8, args.sleep_detection_timeout_ms / 1000,
-                                min(60, args.wake_timeout_ms / 2000))
-            phase_deadline = min(deadline, time.monotonic() + phase_seconds)
+        if attempt < 3:
+            # Reserve time for the final public visit even if the direct body route hangs.
+            phase_ms = min(60_000, args.wake_timeout_ms // 3)
+            if attempt == 1:
+                phase_ms = min(max(phase_ms, args.sleep_detection_timeout_ms),
+                               args.wake_timeout_ms // 2)
+            phase_deadline = min(deadline, time.monotonic() + phase_ms / 1000)
         page = context.new_page()
+        client_error = False
         try:
             response = None
             try:
@@ -289,23 +304,33 @@ def wake_app(context: Any, app: AppUrl, args: argparse.Namespace, timeout_error:
                 # Navigation can time out after useful DOM has already appeared.
                 pass
             if response is not None and response.status >= 400:
-                final_status, detail = "http_error", f"HTTP {response.status}"
-                if response.status < 500:
-                    break
-                continue
-            state, detail, did_click = observe_app(page, phase_deadline, args)
-            clicked = clicked or did_click
-            if state == "ready":
-                return WakeResult(app.name, app.url, "woke" if clicked else "awake", trim(detail),
-                                  attempts, clicked, round(time.monotonic() - started, 3), url)
-            final_status = state
+                state, detail = "http_error", f"HTTP {response.status}"
+                client_error = response.status < 500
+            else:
+                state, detail, did_click = observe_app(page, phase_deadline, args)
+                clicked = clicked or did_click
         except Exception as exc:
-            final_status = "timeout" if isinstance(exc, timeout_error) else "error"
-            detail = trim(str(exc))
+            state = "timeout" if isinstance(exc, timeout_error) else "error"
+            detail = str(exc)
         finally:
             page.close()
+
+        checks.append(RouteCheck(url, state, trim(detail)))
+        if state == "ready":
+            if url == app.url:
+                final_status = "woke" if clicked else "awake"
+                break
+            # A reachable body can wake the backend while its public shell is broken.
+            # Only a fresh visit through the registered URL proves user-facing recovery.
+            final_status = "body_only"
+            detail = "App body rendered; public URL recovery has not been confirmed"
+            continue
+        if final_status != "body_only":
+            final_status = state
+        if client_error and url == app.url:
+            break
     return WakeResult(app.name, app.url, final_status, trim(detail), attempts, clicked,
-                      round(time.monotonic() - started, 3), checked_url)
+                      round(time.monotonic() - started, 3), checked_url, tuple(checks))
 
 
 def write_report(path: Path | None, apps: list[AppUrl], results: list[WakeResult], *, complete: bool) -> None:
@@ -354,6 +379,9 @@ def run_browser(args: argparse.Namespace, apps: list[AppUrl]) -> int:
                 results.append(result)
                 write_report(args.report_file, apps, results, complete=False)
                 print(f"{result.status.upper()}: {result.name} | {result.detail} | {result.elapsed_seconds}s", flush=True)
+                if len(result.checks) > 1:
+                    for check in result.checks:
+                        print(f"  {check.url} | {check.status} | {check.detail}", flush=True)
         finally:
             browser.close()
     write_report(args.report_file, apps, results, complete=True)

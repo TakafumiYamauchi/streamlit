@@ -22,7 +22,7 @@ concurrency:
 jobs:
   wake:
     runs-on: ubuntu-latest
-    # 180 seconds per app bounds even outage checks; setup time is also bounded.
+    # 39 × (180s + up to 5s jitter), then at most five 30s public rechecks.
     timeout-minutes: 150
     steps:
       - name: Check out repository
@@ -58,6 +58,7 @@ jobs:
         run: >
           python streamlit_random_url_opener/playwright_wake/wake_streamlit_apps.py
           --limit "$WAKE_LIMIT"
+          --recheck-first 5
           --max-delay-seconds 5
           --wake-timeout-ms 180000
           --report-file wake-results.json

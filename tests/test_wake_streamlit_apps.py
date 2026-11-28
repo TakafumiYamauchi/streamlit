@@ -251,6 +251,69 @@ class WakeTests(unittest.TestCase):
 
 
 class ReportTests(unittest.TestCase):
+    def test_full_sweep_rechecks_only_eligible_failures_and_counts_each_app_once(self):
+        apps = [wake.AppUrl(str(i), f'https://app-{i}.streamlit.app/') for i in range(7)]
+        statuses = [('timeout', 'shell'), ('http_error', 'HTTP 502'), ('body_only', 'body'),
+                    ('http_error', 'HTTP 404'), ('error', 'exception'), ('timeout', 'shell'), ('awake', 'UI')]
+        calls = []
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'report.json'
+            summary = Path(directory) / 'summary.md'
+            def visit(app, *, public_only):
+                calls.append((app.name, public_only))
+                status, detail = statuses[int(app.name)]
+                if public_only:
+                    partial = json.loads(path.read_text(encoding='utf-8'))
+                    self.assertFalse(partial['complete'])
+                    self.assertEqual(partial['checked'], len(apps))
+                    self.assertEqual(partial['unvisited'], [])
+                    if app.name != '1':
+                        status, detail = 'awake', 'UI'
+                return wake.WakeResult(app.name, app.url, status, detail)
+
+            with patch.dict(wake.os.environ, GITHUB_STEP_SUMMARY=str(summary)):
+                code = wake.run_checks(args(report_file=path, max_delay_seconds=0), apps,
+                                       {app.url for app in apps[:5]}, visit)
+            self.assertEqual(code, 1)
+            self.assertEqual(calls, [(app.name, False) for app in apps] +
+                             [('0', True), ('1', True), ('2', True)])
+            final = json.loads(path.read_text(encoding='utf-8'))
+            self.assertEqual((final['complete'], final['checked'], final['successful']), (True, 7, 3))
+            self.assertEqual(final['results'][0]['first_visit']['status'], 'timeout')
+            self.assertEqual(final['results'][0]['status'], 'awake')
+            self.assertEqual(final['results'][1]['first_visit']['detail'], 'HTTP 502')
+            self.assertNotIn('first_visit', final['results'][5])
+            summary_text = summary.read_text(encoding='utf-8')
+            self.assertIn('Initial 1/7 → Final 3/7', summary_text)
+            self.assertIn('Rechecked 3 · Recovered 2 · Unresolved 4', summary_text)
+
+    def test_fresh_public_check_obeys_one_navigation_and_thirty_second_budget(self):
+        clock = Clock()
+        context = Context([Page(clock, [Frame(['loading'], clock)])])
+        app = wake.AppUrl('test', 'https://test.streamlit.app/')
+        with patch.object(wake.time, 'monotonic', side_effect=lambda: clock.now):
+            result = wake.wake_app(context, app, args(), BrowserTimeout, public_only=True)
+        self.assertEqual(result.status, 'timeout')
+        self.assertEqual([check.url for check in result.checks], [app.url])
+        self.assertLessEqual(clock.now, 30.001)
+
+    def test_recovered_only_outage_succeeds_and_filtered_runs_skip_rechecks(self):
+        app = wake.AppUrl('test', 'https://test.streamlit.app/')
+        def visit(app, *, public_only):
+            return wake.WakeResult(app.name, app.url, 'awake' if public_only else 'timeout', '')
+
+        with patch.dict(wake.os.environ, GITHUB_STEP_SUMMARY=''):
+            self.assertEqual(wake.run_checks(args(report_file=None, max_delay_seconds=0), [app], {app.url}, visit), 0)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'urls.json'
+            path.write_text(json.dumps([{'name':app.name, 'url':app.url}]), encoding='utf-8')
+            for selection in (['--limit', '1'], ['--only-url', app.url]):
+                with self.subTest(selection=selection), patch.object(wake.sys, 'argv',
+                        ['wake', '--urls-file', str(path), '--recheck-first', '5', *selection]), \
+                        patch.object(wake, 'run_browser', return_value=0) as run:
+                    self.assertEqual(wake.main(), 0)
+                    self.assertEqual(run.call_args.args[2], set())
+
     def test_partial_report_names_unvisited_and_final_report_records_failures(self):
         apps = [wake.AppUrl('a', 'https://a.streamlit.app/'), wake.AppUrl('b', 'https://b.streamlit.app/')]
         results = [wake.WakeResult('a', apps[0].url, 'awake', 'visible')]
